@@ -40,14 +40,14 @@ No error checking on variables is currentlly performed. If you mistype the name 
 
 Consider the following example files:
 
-### maillist.tsv
+### `maillist.tsv`
 
 | Email | FirstName | LastName | Id |
 | ----- | --------- | -------- | ---- |
 | foo@bar.baz | Jane | Doe | 19 |
 | abc@def.ghi | Edgar | Winters | 22 |
 
-### template.txt
+### `template.txt`
 
 ```html
 Subject: test message to [[FirstName]] [[LastName]]
@@ -62,6 +62,8 @@ Attach: file_[[Id]].txt
 
 <p>This message was sent to [[Email]]</p>
 ```
+
+### result
 
 This will result in two emails being sent. The first email will have attached the `file_19.txt` and look like this:
 ```html
