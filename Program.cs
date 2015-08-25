@@ -20,9 +20,9 @@ namespace bulkmail
             [PositionalArg(1), Required, Help("list of recipients as a tab-separated value file; first line is a header")]
             public string Maillist { get; set; }
 
-            [NamedArg(LongForm="preview", ShortForm='p'), DefaultValue("false"), Help("if true, then just write html emails but don't send.")]
+            [NamedArg(LongForm="preview", ShortForm='p'), Help("if true, then just write html emails but don't send.")]
             public bool Preview { get; set; }
-            [NamedArg(LongForm="traceexch", ShortForm='t'), DefaultValue("false"), Help("if true, debug connection with exchange")]
+            [NamedArg(LongForm="traceexch", ShortForm='t'), Help("if true, debug connection with exchange")]
             public bool TraceExchange { get; set; }
             [NamedArg(LongForm="previewdir", ShortForm='d'), DefaultValue("preview"), Help("directory where previews should be written")]
             public string PreviewDir { get; set; }
@@ -63,12 +63,6 @@ namespace bulkmail
                     foreach (var kvp in item)
                         s = s.Replace("[[" + kvp.Key + "]]", kvp.Value);
 
-                    if (o.Preview)
-                    {
-                        File.WriteAllText(Path.Combine(o.PreviewDir, string.Format("preview_{0}.html", ++i)), s);
-                        continue;
-                    }
-
                     bool foundEmpty = false;
                     StringBuilder body = new StringBuilder();
                     foreach (var line in s.Split('\n'))
@@ -91,6 +85,28 @@ namespace bulkmail
                     }
                     mail.Body = body.ToString();
 
+                    if (o.Preview)
+                    {
+                        using (var sw = new StreamWriter(Path.Combine(o.PreviewDir, string.Format("preview_{0}.html", ++i))))
+                        {
+                            sw.WriteLine("<pre>");
+                            sw.WriteLine("Subject: " + mail.Subject);
+                            foreach (var email in mail.ToRecipients)
+                                sw.WriteLine("To: " + email.ToString());
+                            foreach (var email in mail.CcRecipients)
+                                sw.WriteLine("Cc: " + email.ToString());
+                            foreach (var email in mail.BccRecipients)
+                                sw.WriteLine("Bcc: " + email.ToString());
+                            foreach (var attach in mail.Attachments)
+                                sw.WriteLine("Attach: " + attach.Name);
+                            sw.WriteLine("</pre>");
+                            sw.WriteLine("<hr>");
+                            sw.WriteLine(mail.Body);
+                        }
+                        continue;
+                    }
+
+
                     mail.SendAndSaveCopy();
                 }
             }
@@ -102,7 +118,7 @@ namespace bulkmail
             }
             catch (Exception exn)
             {
-                Console.Error.WriteLine(exn.Message);
+                Console.Error.WriteLine(exn.ToString());
                 Environment.Exit(1);
             }
         }
