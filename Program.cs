@@ -12,57 +12,98 @@ namespace bulkmail
 {
     class Program
     {
+        [Help("send bulk emails using office365 or an exchange server")]
+        class Options
+        {
+            [PositionalArg(0), Required, Help("template for email; starting with headers, then HTML email body")]
+            public string Template { get; set; }
+            [PositionalArg(1), Required, Help("list of recipients as a tab-separated value file; first line is a header")]
+            public string Maillist { get; set; }
+
+            [NamedArg(LongForm="preview", ShortForm='p'), DefaultValue("false"), Help("if true, then just write html emails but don't send.")]
+            public bool Preview { get; set; }
+            [NamedArg(LongForm="traceexch", ShortForm='t'), DefaultValue("false"), Help("if true, debug connection with exchange")]
+            public bool TraceExchange { get; set; }
+            [NamedArg(LongForm="previewdir", ShortForm='d'), DefaultValue("preview"), Help("directory where previews should be written")]
+            public string PreviewDir { get; set; }
+            [NamedArg(LongForm = "server", ShortForm = 's'), DefaultValue("https://outlook.office365.com/ews/exchange.asmx"), Help("exchange server")]
+            public string ExchangeServer { get; set; }
+        }
+
         static void Main(string[] args)
         {
-            if (args.Length != 2)
+            try
             {
-                Console.Error.WriteLine("ERROR need two args: template maillist.tsv");
+                var o = CommandLineParser.ParseCommandLine<Options>(args);
+
+                var template = File.ReadAllText(o.Template);
+                var maillist = ReadTsv(o.Maillist).ToList();
+
+                var service = new ExchangeService(ExchangeVersion.Exchange2013_SP1);
+                NetworkCredential nc;
+                Credential.GetCredentialsVistaAndUp("office365", out nc);
+                service.Credentials = nc;
+                if (o.TraceExchange)
+                {
+                    service.TraceEnabled = true;
+                    service.TraceFlags = TraceFlags.All;
+                }
+                service.Url = new Uri(o.ExchangeServer);
+
+                if (o.Preview && !Directory.Exists(o.PreviewDir))
+                    Directory.CreateDirectory(o.PreviewDir);
+
+                Regex r = new Regex(@"^\s*([^:]+):\s*(.*)$");
+                int i = 0;
+                foreach (var item in maillist)
+                {
+                    var mail = new EmailMessage(service);
+
+                    var s = template;
+                    foreach (var kvp in item)
+                        s = s.Replace("[[" + kvp.Key + "]]", kvp.Value);
+
+                    if (o.Preview)
+                    {
+                        File.WriteAllText(Path.Combine(o.PreviewDir, string.Format("preview_{0}.html", ++i)), s);
+                        continue;
+                    }
+
+                    bool foundEmpty = false;
+                    StringBuilder body = new StringBuilder();
+                    foreach (var line in s.Split('\n'))
+                    {
+                        if (foundEmpty) { body.AppendLine(line); continue; }
+                        if (string.IsNullOrWhiteSpace(line)) { foundEmpty = true; continue; }
+                        var m = r.Match(line);
+                        if (!m.Success) throw new Exception("bad header field " + line);
+                        switch (m.Groups[1].Value.ToLowerInvariant())
+                        {
+                            case "subject": mail.Subject = m.Groups[2].Value.Trim(); break;
+                            case "to": mail.ToRecipients.Add(m.Groups[2].Value.Trim()); break;
+                            case "cc": mail.CcRecipients.Add(m.Groups[2].Value.Trim()); break;
+                            case "bcc": mail.BccRecipients.Add(m.Groups[2].Value.Trim()); break;
+                            case "attach": mail.Attachments.AddFileAttachment(m.Groups[2].Value.Trim()); break;
+
+                            default:
+                                throw new Exception("unknown field in template: " + m.Groups[1].Value);
+                        }
+                    }
+                    mail.Body = body.ToString();
+
+                    mail.SendAndSaveCopy();
+                }
+            }
+            catch (CommandLineParseError err)
+            {
+                Console.Error.WriteLine(err.Message);
+                Console.Error.WriteLine(err.Usage);
                 Environment.Exit(1);
             }
-
-            var template = File.ReadAllText(args[0]);
-            var maillist = ReadTsv(args[1]).ToList();
-
-            var service = new ExchangeService(ExchangeVersion.Exchange2013_SP1);
-            NetworkCredential nc;
-            Credential.GetCredentialsVistaAndUp("office365", out nc);
-            service.Credentials = nc;
-            service.TraceEnabled = true;
-            service.TraceFlags = TraceFlags.All;
-            service.Url = new Uri("https://outlook.office365.com/ews/exchange.asmx");
-
-            Regex r = new Regex(@"^\s*([^:]+):\s*(.*)$");
-            foreach (var item in maillist)
+            catch (Exception exn)
             {
-                var mail = new EmailMessage(service);
-
-                var s = template;
-                foreach (var kvp in item)
-                    s = s.Replace("[[" + kvp.Key + "]]", kvp.Value);
-
-                bool foundEmpty = false;
-                StringBuilder body = new StringBuilder();
-                foreach (var line in s.Split('\n'))
-                {
-                    if (foundEmpty) { body.AppendLine(line); continue; }
-                    if (string.IsNullOrWhiteSpace(line)) { foundEmpty = true; continue; }
-                    var m = r.Match(line);
-                    if (!m.Success) throw new Exception("bad header field " + line);
-                    switch (m.Groups[1].Value.ToLowerInvariant())
-                    {
-                        case "subject": mail.Subject = m.Groups[2].Value.Trim(); break;
-                        case "to": mail.ToRecipients.Add(m.Groups[2].Value.Trim()); break;
-                        case "cc": mail.CcRecipients.Add(m.Groups[2].Value.Trim()); break;
-                        case "bcc": mail.BccRecipients.Add(m.Groups[2].Value.Trim()); break;
-                        case "attach": mail.Attachments.AddFileAttachment(m.Groups[2].Value.Trim()); break;
-
-                        default:
-                            throw new Exception("unknown field in template: " + m.Groups[1].Value);
-                    }
-                }
-                mail.Body = body.ToString();
-
-                mail.SendAndSaveCopy();
+                Console.Error.WriteLine(exn.Message);
+                Environment.Exit(1);
             }
         }
 
